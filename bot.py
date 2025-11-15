@@ -5,7 +5,9 @@ import logging
 from datetime import datetime
 from aiogram import Bot, Dispatcher, executor, types
 from PIL import Image
-from dotenv import load_dotenv   # <---- добавлено
+from dotenv import load_dotenv
+from aiohttp import web
+import asyncio
 
 # === Загрузка переменных окружения ===
 load_dotenv()
@@ -34,13 +36,11 @@ logging.basicConfig(
 )
 
 def log_usage(user_id, collection, hymn_number):
-    """Логирует факт отправки гимна"""
     os.makedirs("logs", exist_ok=True)
     with open("logs/usage_log.txt", "a", encoding="utf-8") as f:
         f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} | user_id={user_id} | collection={collection} | hymn_number={hymn_number}\n")
 
 def log_action(user_id, action):
-    """Логирует общие действия"""
     os.makedirs("logs", exist_ok=True)
     with open("logs/log.csv", "a", encoding="utf-8") as log:
         log.write(f"{user_id};{action}\n")
@@ -67,28 +67,29 @@ async def choose_collection(message: types.Message):
     await message.answer(f"📖 Активирован {message.text}. Введите номер или часть названия гимна.", reply_markup=main_keyboard)
     log_action(message.from_user.id, f"choose_collection:{current_collection}")
 
-# === Отправка страниц гимна ===
 async def send_hymn_pages(message, hymn):
     try:
         folder = hymn['collection']
         number = hymn['number']
-        # строгое совпадение по номеру файла
+
         pages = [
             f for f in os.listdir(folder)
             if re.match(fr'^{re.escape(number)}(_|\.)', f)
         ]
+
         if not pages:
             await message.answer("⚠️ Страницы для этого гимна не найдены.", reply_markup=main_keyboard)
             return
+
         for page in sorted(pages):
             with open(os.path.join(folder, page), 'rb') as photo:
                 await message.answer_photo(photo, reply_markup=main_keyboard)
+
         log_action(message.from_user.id, f"send_hymn:{folder}:{number}")
         log_usage(message.from_user.id, folder, number)
     except Exception:
         logging.exception(f"Ошибка при отправке гимна {hymn['number']} ({hymn['collection']})")
 
-# === Поиск по номеру (учитывает только цифры в запросе) ===
 @dp.message_handler(lambda message: re.search(r'\d+', message.text.strip()))
 async def search_by_number_only_digits(message: types.Message):
     global current_collection
@@ -97,18 +98,10 @@ async def search_by_number_only_digits(message: types.Message):
         return
 
     try:
-        number_match = re.search(r'(\d+)', message.text.strip())
-        if not number_match:
-            await message.answer("Не удалось определить номер гимна.", reply_markup=main_keyboard)
-            return
+        number = re.search(r'(\d+)', message.text.strip()).group(1).strip()
 
-        number = number_match.group(1).strip()
-
-        # строгое совпадение номера
         match = next(
-            (h for h in hymns
-             if h['number'].strip() == number
-             and h['collection'] == current_collection),
+            (h for h in hymns if h['number'].strip() == number and h['collection'] == current_collection),
             None
         )
 
@@ -121,7 +114,6 @@ async def search_by_number_only_digits(message: types.Message):
     except Exception:
         logging.exception(f"Ошибка при поиске гимна по номеру ({message.text})")
 
-# === Поиск по названию ===
 def search_hymn_by_title(title_query, hymns, collection):
     return [
         hymn for hymn in hymns
@@ -132,7 +124,7 @@ def search_hymn_by_title(title_query, hymns, collection):
 async def handle_text_search(message: types.Message):
     global current_collection
     if not current_collection:
-        await message.answer("Сначала выберите сборник (Красный или Молодёжный).", reply_markup=main_keyboard)
+        await message.answer("Сначала выберите сборник.", reply_markup=main_keyboard)
         return
 
     query = message.text.strip()
@@ -150,11 +142,38 @@ async def handle_text_search(message: types.Message):
             for hymn in matches:
                 text += f"{hymn['number']} — {hymn['title']}\n"
             await message.answer(text, reply_markup=main_keyboard)
+
         log_action(message.from_user.id, f"search_title:{query}")
     except Exception:
         logging.exception(f"Ошибка при поиске по названию ({query})")
 
-# === Запуск ===
-if __name__ == '__main__':
+
+# === HEALTHCHECK ДЛЯ KOYEB ===
+
+async def health(request):
+    return web.Response(text="OK")
+
+async def start_all():
+    # Запускаем Telegram бота
+    asyncio.ensure_future(executor.start_polling(dp, skip_updates=True))
+
+    # HTTP сервер для Koyeb
+    app = web.Application()
+    app.router.add_get("/healthz", health)
+
+    port = int(os.environ.get("PORT", 8000))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+
+    print(f"🌐 Healthcheck server is running on port {port}")
+    await site.start()
+
+    # чтобы не завершалась программа
+    await asyncio.Event().wait()
+
+
+# === АВТОЗАПУСК ===
+if __name__ == "__main__":
     print("🤖 Бот запущен!")
-    executor.start_polling(dp)
+    asyncio.run(start_all())
