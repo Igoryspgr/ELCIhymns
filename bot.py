@@ -6,8 +6,7 @@ from datetime import datetime
 from aiogram import Bot, Dispatcher, executor, types
 from PIL import Image
 from dotenv import load_dotenv
-from aiohttp import web
-import asyncio
+from aiohttp import web   # <----- добавлено
 
 # === Загрузка переменных окружения ===
 load_dotenv()
@@ -18,6 +17,13 @@ if not TOKEN:
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
+
+# === Запускаем веб-сервер для Koyeb Health Check ===
+async def health(request):
+    return web.Response(text="OK", status=200)
+
+app = web.Application()
+app.router.add_get("/health", health)
 
 # === Главное меню ===
 main_keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -67,29 +73,27 @@ async def choose_collection(message: types.Message):
     await message.answer(f"📖 Активирован {message.text}. Введите номер или часть названия гимна.", reply_markup=main_keyboard)
     log_action(message.from_user.id, f"choose_collection:{current_collection}")
 
+# === Отправка страниц гимна ===
 async def send_hymn_pages(message, hymn):
     try:
         folder = hymn['collection']
         number = hymn['number']
-
         pages = [
             f for f in os.listdir(folder)
             if re.match(fr'^{re.escape(number)}(_|\.)', f)
         ]
-
         if not pages:
             await message.answer("⚠️ Страницы для этого гимна не найдены.", reply_markup=main_keyboard)
             return
-
         for page in sorted(pages):
             with open(os.path.join(folder, page), 'rb') as photo:
                 await message.answer_photo(photo, reply_markup=main_keyboard)
-
         log_action(message.from_user.id, f"send_hymn:{folder}:{number}")
         log_usage(message.from_user.id, folder, number)
     except Exception:
         logging.exception(f"Ошибка при отправке гимна {hymn['number']} ({hymn['collection']})")
 
+# === Поиск по номеру ===
 @dp.message_handler(lambda message: re.search(r'\d+', message.text.strip()))
 async def search_by_number_only_digits(message: types.Message):
     global current_collection
@@ -98,10 +102,16 @@ async def search_by_number_only_digits(message: types.Message):
         return
 
     try:
-        number = re.search(r'(\d+)', message.text.strip()).group(1).strip()
+        number_match = re.search(r'(\d+)', message.text.strip())
+        if not number_match:
+            await message.answer("Не удалось определить номер гимна.", reply_markup=main_keyboard)
+            return
+
+        number = number_match.group(1).strip()
 
         match = next(
-            (h for h in hymns if h['number'].strip() == number and h['collection'] == current_collection),
+            (h for h in hymns
+             if h['number'].strip() == number and h['collection'] == current_collection),
             None
         )
 
@@ -112,8 +122,9 @@ async def search_by_number_only_digits(message: types.Message):
 
         log_action(message.from_user.id, f"search_number:{number}")
     except Exception:
-        logging.exception(f"Ошибка при поиске гимна по номеру ({message.text})")
+        logging.exception(f"Ошибка при поиске по номеру ({message.text})")
 
+# === Поиск по названию ===
 def search_hymn_by_title(title_query, hymns, collection):
     return [
         hymn for hymn in hymns
@@ -147,33 +158,13 @@ async def handle_text_search(message: types.Message):
     except Exception:
         logging.exception(f"Ошибка при поиске по названию ({query})")
 
-
-# === HEALTHCHECK ДЛЯ KOYEB ===
-
-async def health(request):
-    return web.Response(text="OK")
-
-async def start_all():
-    # Запускаем Telegram бота
-    asyncio.ensure_future(executor.start_polling(dp, skip_updates=True))
-
-    # HTTP сервер для Koyeb
-    app = web.Application()
-    app.router.add_get("/healthz", health)
-
-    port = int(os.environ.get("PORT", 8000))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port)
-
-    print(f"🌐 Healthcheck server is running on port {port}")
-    await site.start()
-
-    # чтобы не завершалась программа
-    await asyncio.Event().wait()
-
-
-# === АВТОЗАПУСК ===
-if __name__ == "__main__":
+# === Запуск ===
+if __name__ == '__main__':
     print("🤖 Бот запущен!")
-    asyncio.run(start_all())
+
+    # Запускаем веб-сервер health-check
+    import threading
+    threading.Thread(target=lambda: web.run_app(app, host="0.0.0.0", port=8000)).start()
+
+    # Запускаем Telegram-бота
+    executor.start_polling(dp, skip_updates=True)
