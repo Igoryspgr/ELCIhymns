@@ -164,7 +164,7 @@ if __name__ == '__main__':
 
     # Запускаем веб-сервер health-check
     import threading
-    threading.Thread(target=lambda: web.run_app(app, host="0.0.0.0", port=8000)).start()
+    threading.Thread(target=lambda: web.run_app(app, host="0.0.0.0", port=800)).start()
 
     # Запускаем Telegram-бота
     executor.start_polling(dp, skip_updates=True)
