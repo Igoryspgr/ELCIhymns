@@ -5,17 +5,16 @@ import logging
 from datetime import datetime
 from aiogram import Bot, Dispatcher, executor, types
 from PIL import Image
-from dotenv import load_dotenv
 from aiohttp import web
 import asyncio
 
 # === Загрузка переменных окружения ===
-load_dotenv()
+# Koyeb автоматически устанавливает PORT, берем из переменных окружения
 TOKEN = os.getenv("TOKEN")
-PORT = int(os.getenv("PORT", 8000))  # Используем порт 8000 по умолчанию
+PORT = int(os.getenv("PORT", 8000))  # ВАЖНО: 8000, а не 800!
 
 if not TOKEN:
-    raise ValueError("❌ TOKEN не найден! Убедитесь, что он записан в .env")
+    raise ValueError("❌ TOKEN не найден! Убедитесь, что он установлен в Environment Variables Koyeb")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
@@ -176,7 +175,7 @@ async def on_startup(dp):
     # Запускаем веб-сервер в том же event loop
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)  # Используем PORT из переменной окружения
+    site = web.TCPSite(runner, '0.0.0.0', PORT)  # ВАЖНО: используем PORT (8000)
     await site.start()
     print(f"🌐 Веб-сервер запущен на порту {PORT}")
 
