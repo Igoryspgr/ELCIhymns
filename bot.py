@@ -3,7 +3,7 @@ import csv
 import re
 import logging
 from datetime import datetime
-from aiogram import Bot, Dispatcher, executor, types
+from aiogram import Bot, Dispatcher, types
 from PIL import Image
 from dotenv import load_dotenv
 from aiohttp import web
@@ -12,12 +12,13 @@ import asyncio
 # === Загрузка переменных окружения ===
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
+PORT = int(os.getenv("PORT", 8000))   # <-- ВАЖНО ДЛЯ KOYEB
 
 if not TOKEN:
-    raise ValueError("❌ TOKEN не найден!")
+    raise ValueError("❌ TOKEN не найден! Убедитесь, что он записан в .env")
 
 bot = Bot(token=TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher()
 
 # === Health-check endpoint ===
 async def health(request):
@@ -55,11 +56,10 @@ current_collection = None
 async def start(message: types.Message):
     await message.answer("Выберите сборник гимнов:", reply_markup=main_keyboard)
 
-@dp.message_handler(lambda m: m.text in ["Красный сборник", "Молодёжный сборник"])
+@dp.message_handler(lambda message: message.text in ["Красный сборник", "Молодёжный сборник"])
 async def choose_collection(message: types.Message):
     global current_collection
     current_collection = "red" if message.text == "Красный сборник" else "youth"
-
     await message.answer(
         f"📖 Активирован {message.text}. Введите номер или часть названия гимна.",
         reply_markup=main_keyboard
@@ -76,26 +76,26 @@ async def send_hymn_pages(message, hymn):
     ]
 
     if not pages:
-        await message.answer("⚠️ Страницы не найдены.")
+        await message.answer("⚠️ Страницы не найдены.", reply_markup=main_keyboard)
         return
 
     for page in sorted(pages):
         with open(os.path.join(folder, page), "rb") as photo:
             await message.answer_photo(photo)
 
-# === Основной запуск ===
+# === Запуск одновременно Telegram + web ===
 async def main():
     # запускаем health-check сервер
     runner = web.AppRunner(app)
     await runner.setup()
 
-    site = web.TCPSite(runner, host="0.0.0.0", port=800)
+    site = web.TCPSite(runner, host="0.0.0.0", port=PORT)
     await site.start()
-    print("🌐 Health-check сервер запущен на порту 800")
+    print(f"🌐 Health-check сервер запущен на порту {PORT}")
 
-    # запускаем Telegram-бота
+    # запускаем бота
     print("🤖 Telegram-бот запущен!")
-    await dp.start_polling()
+    await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
