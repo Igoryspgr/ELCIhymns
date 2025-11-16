@@ -3,9 +3,8 @@ import csv
 import re
 import logging
 from datetime import datetime
-from aiogram import Bot, Dispatcher, types
-from aiogram.enums import ParseMode
-from aiogram import F
+from aiogram import Bot, Dispatcher, executor, types
+from PIL import Image
 from dotenv import load_dotenv
 from aiohttp import web
 import asyncio
@@ -15,12 +14,12 @@ load_dotenv()
 TOKEN = os.getenv("TOKEN")
 
 if not TOKEN:
-    raise ValueError("❌ TOKEN не найден! Убедитесь, что он записан в .env")
+    raise ValueError("❌ TOKEN не найден!")
 
-bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher()
+bot = Bot(token=TOKEN)
+dp = Dispatcher(bot)
 
-# === Health-check ===
+# === Health-check endpoint ===
 async def health(request):
     return web.Response(text="OK", status=200)
 
@@ -44,101 +43,59 @@ logging.basicConfig(
 )
 
 # === Загрузка гимнов ===
-with open("songs.csv", "r", encoding="utf-8") as f:
-    hymns = list(csv.DictReader(f, delimiter=';'))
+hymns = []
+with open('songs.csv', 'r', encoding='utf-8') as f:
+    reader = csv.DictReader(f, delimiter=';')
+    hymns = list(reader)
 
 current_collection = None
 
 # === Команды ===
-@dp.message(F.text == "/start")
+@dp.message_handler(commands=['start'])
 async def start(message: types.Message):
     await message.answer("Выберите сборник гимнов:", reply_markup=main_keyboard)
 
-@dp.message(F.text.in_(["Красный сборник", "Молодёжный сборник"]))
+@dp.message_handler(lambda m: m.text in ["Красный сборник", "Молодёжный сборник"])
 async def choose_collection(message: types.Message):
     global current_collection
     current_collection = "red" if message.text == "Красный сборник" else "youth"
+
     await message.answer(
         f"📖 Активирован {message.text}. Введите номер или часть названия гимна.",
         reply_markup=main_keyboard
     )
 
-# === Отправка страниц гимна ===
+# === Отправка страниц ===
 async def send_hymn_pages(message, hymn):
-    folder = hymn["collection"]
-    number = hymn["number"]
+    folder = hymn['collection']
+    number = hymn['number']
 
     pages = [
         f for f in os.listdir(folder)
-        if re.match(fr"^{re.escape(number)}(_|\.)", f)
+        if re.match(fr'^{re.escape(number)}(_|\.)', f)
     ]
 
     if not pages:
-        await message.answer("⚠️ Страницы не найдены.", reply_markup=main_keyboard)
+        await message.answer("⚠️ Страницы не найдены.")
         return
 
     for page in sorted(pages):
         with open(os.path.join(folder, page), "rb") as photo:
             await message.answer_photo(photo)
 
-# === Поиск по номеру ===
-@dp.message(lambda msg: msg.text and re.search(r'\d+', msg.text))
-async def search_by_number(message: types.Message):
-    global current_collection
-    if not current_collection:
-        await message.answer("Сначала выберите сборник.", reply_markup=main_keyboard)
-        return
-
-    number = re.search(r"(\d+)", message.text).group(1)
-
-    hymn = next(
-        (h for h in hymns if h["number"] == number and h["collection"] == current_collection),
-        None
-    )
-
-    if hymn:
-        await send_hymn_pages(message, hymn)
-    else:
-        await message.answer("Гимн с таким номером не найден.", reply_markup=main_keyboard)
-
-# === Поиск по названию ===
-@dp.message(lambda msg: msg.text and not re.search(r'\d+', msg.text))
-async def search_by_title(message: types.Message):
-    global current_collection
-    if not current_collection:
-        await message.answer("Сначала выберите сборник.", reply_markup=main_keyboard)
-        return
-
-    query = message.text.lower()
-
-    matches = [
-        h for h in hymns
-        if query in h["title"].lower() and h["collection"] == current_collection
-    ]
-
-    if not matches:
-        await message.answer("Гимн не найден 😢")
-        return
-
-    if len(matches) == 1:
-        await send_hymn_pages(message, matches[0])
-    else:
-        text = "🔍 Найдено несколько гимнов:\n\n"
-        text += "\n".join(f"{h['number']} — {h['title']}" for h in matches)
-        await message.answer(text)
-
 # === Основной запуск ===
 async def main():
-    # Запуск health-check сервера
+    # запускаем health-check сервер
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 800)
-    await site.start()
-    print("🌐 Health-check сервер: порт 800")
 
-    # Старт Telegram
+    site = web.TCPSite(runner, host="0.0.0.0", port=800)
+    await site.start()
+    print("🌐 Health-check сервер запущен на порту 800")
+
+    # запускаем Telegram-бота
     print("🤖 Telegram-бот запущен!")
-    await dp.start_polling(bot)
+    await dp.start_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
