@@ -6,7 +6,8 @@ from datetime import datetime
 from aiogram import Bot, Dispatcher, executor, types
 from PIL import Image
 from dotenv import load_dotenv
-from aiohttp import web   # <----- добавлено
+from aiohttp import web
+import asyncio
 
 # === Загрузка переменных окружения ===
 load_dotenv()
@@ -18,12 +19,18 @@ if not TOKEN:
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-# === Запускаем веб-сервер для Koyeb Health Check ===
+# === Веб-сервер для Koyeb Health Check ===
 async def health(request):
     return web.Response(text="OK", status=200)
 
-app = web.Application()
-app.router.add_get("/health", health)
+async def root_handler(request):
+    return web.Response(text="Bot is running", status=200)
+
+def create_web_app():
+    app = web.Application()
+    app.router.add_get("/health", health)
+    app.router.add_get("/", root_handler)
+    return app
 
 # === Главное меню ===
 main_keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -159,12 +166,22 @@ async def handle_text_search(message: types.Message):
         logging.exception(f"Ошибка при поиске по названию ({query})")
 
 # === Запуск ===
-if __name__ == '__main__':
+async def on_startup(dp):
     print("🤖 Бот запущен!")
+    # Запускаем веб-сервер в том же event loop
+    runner = web.AppRunner(create_web_app())
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 800)
+    await site.start()
+    print("🌐 Веб-сервер запущен на порту 800")
 
-    # Запускаем веб-сервер health-check
-    import threading
-    threading.Thread(target=lambda: web.run_app(app, host="0.0.0.0", port=800)).start()
+async def on_shutdown(dp):
+    print("🤖 Бот остановлен!")
 
-    # Запускаем Telegram-бота
-    executor.start_polling(dp, skip_updates=True)
+if __name__ == '__main__':
+    executor.start_polling(
+        dp, 
+        skip_updates=True,
+        on_startup=on_startup,
+        on_shutdown=on_shutdown
+    )
