@@ -3,7 +3,7 @@ import csv
 import re
 import logging
 from datetime import datetime
-from aiogram import Bot, Dispatcher, executor, types  # <-- добавить executor
+from aiogram import Bot, Dispatcher, executor, types
 from PIL import Image
 from dotenv import load_dotenv
 from aiohttp import web
@@ -12,13 +12,13 @@ import asyncio
 # === Загрузка переменных окружения ===
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
-PORT = int(os.getenv("PORT", 8000))
+PORT = int(os.getenv("PORT", 8000))  # Используем порт 8000 по умолчанию
 
 if not TOKEN:
     raise ValueError("❌ TOKEN не найден! Убедитесь, что он записан в .env")
 
 bot = Bot(token=TOKEN)
-dp = Dispatcher(bot)  # <-- передать бота в конструктор
+dp = Dispatcher(bot)
 
 # === Health-check endpoint ===
 async def health(request):
@@ -29,7 +29,7 @@ async def root_handler(request):
 
 app = web.Application()
 app.router.add_get("/health", health)
-app.router.add_get("/", root_handler)  # <-- добавить корневой путь
+app.router.add_get("/", root_handler)
 
 # === Главное меню ===
 main_keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -176,7 +176,7 @@ async def on_startup(dp):
     # Запускаем веб-сервер в том же event loop
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    site = web.TCPSite(runner, '0.0.0.0', PORT)  # Используем PORT из переменной окружения
     await site.start()
     print(f"🌐 Веб-сервер запущен на порту {PORT}")
 
